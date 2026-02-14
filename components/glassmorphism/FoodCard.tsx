@@ -1,6 +1,6 @@
 'use client';
 
-import { Heart, Plus } from 'lucide-react';
+import { Plus } from 'lucide-react';
 import Image from 'next/image';
 
 interface FoodItem {

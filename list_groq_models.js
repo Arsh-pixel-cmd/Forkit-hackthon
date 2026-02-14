@@ -1,4 +1,5 @@
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const Groq = require("groq-sdk");
 
 const apiKey = process.argv[2];

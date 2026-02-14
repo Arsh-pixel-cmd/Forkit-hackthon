@@ -29,7 +29,7 @@ export interface EcoScore {
 }
 
 // Mock Functions
-export const fetchRecipeProfile = async (id: string): Promise<RecipeProfile | null> => {
+export const fetchRecipeProfile = async (_id: string): Promise<RecipeProfile | null> => {
     return null; // Mock
 };
 

@@ -1,4 +1,5 @@
 
+// eslint-disable-next-line @typescript-eslint/no-require-imports
 const { GoogleGenerativeAI } = require("@google/generative-ai");
 
 // Get key from args
@@ -8,7 +9,7 @@ if (!apiKey) {
     process.exit(1);
 }
 
-const genAI = new GoogleGenerativeAI(apiKey);
+const _genAI = new GoogleGenerativeAI(apiKey);
 
 async function listModels() {
     try {

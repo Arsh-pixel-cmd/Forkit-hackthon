@@ -1,15 +1,15 @@
 'use client';
 
-import { useRef, useMemo } from 'react';
+import { useRef } from 'react';
 import { motion, useScroll, useTransform, useSpring, MotionValue } from 'framer-motion';
-import { ArrowRight, ChevronDown, Activity, ShieldCheck, Search, Repeat, Star, Zap, CheckCircle2 } from 'lucide-react';
+import { ArrowRight, ChevronDown, Activity, ShieldCheck, Search, Repeat, Star, Zap } from 'lucide-react';
 import Image from 'next/image';
 import Link from 'next/link';
 
 // --- ULTRA REALISTIC ASSETS ---
 const HERO_FOOD = "https://images.unsplash.com/photo-1546069901-ba9599a7e63c?q=80&w=2680&auto=format&fit=crop"; // High-res Pokebowl
 const PHONE_MOCKUP_BG = "https://images.unsplash.com/photo-1556910103-1c02745a30bf?q=80&w=2670&auto=format&fit=crop"; // Kitchen/Lab Abstract
-const METRIC_BG = "https://images.unsplash.com/photo-1550989460-0adf9ea622e2?q=80&w=2574&auto=format&fit=crop"; // Lab Glassware
+
 
 export default function LandingPage() {
     const containerRef = useRef<HTMLDivElement>(null);
@@ -79,7 +79,7 @@ function ActOne({ progress }: { progress: MotionValue<number> }) {
 
                     {/* --- LAYER 2: The 'X-Ray' Scan Effect --- */}
                     <motion.div
-                        style={{ clipPath: useTransform(scanLineTop, (v: any) => `inset(0 0 ${100 - parseFloat(v)}% 0)`) }}
+                        style={{ clipPath: useTransform(scanLineTop, (v: string) => `inset(0 0 ${100 - parseFloat(v)}% 0)`) }}
                         className="absolute inset-0 z-10 flex items-center justify-center"
                     >
                         <div className="relative w-full h-full md:w-[90vw] md:h-[90vh] rounded-[3rem] overflow-hidden bg-[#0a0a0a]">
@@ -337,7 +337,7 @@ function ActThree() {
     );
 }
 
-function StickyCard({ index, title, subtitle, desc, color, gradient, icon: Icon }: any) {
+function StickyCard({ index, title, subtitle, desc, color, gradient, icon: Icon }: { index: number; title: string; subtitle: string; desc: string; color: string; gradient: string; icon: React.ComponentType<{ size?: number }> }) {
     return (
         <div className="sticky top-[25vh] w-full max-w-4xl perspective-[1000px]">
             <motion.div

@@ -1,7 +1,7 @@
 'use client';
 
 import { useState } from 'react';
-import { Tag, ShoppingBag, Truck, Apple, Stethoscope, Check, Copy, ArrowRight } from 'lucide-react';
+import { Tag, Truck, Apple, Stethoscope, Check, Copy, ArrowRight } from 'lucide-react';
 
 const CATEGORIES = [
     { id: 'all', label: 'All', icon: Tag },
@@ -119,8 +119,8 @@ export default function DealsPage() {
                                         <button
                                             onClick={() => canAfford && setClaimed(p => ({ ...p, [deal.id]: true }))}
                                             className={`w-full py-2.5 rounded-xl text-xs font-bold flex items-center justify-center gap-1 transition-all ${canAfford
-                                                    ? 'bg-black text-white hover:bg-black/85 active:scale-95'
-                                                    : 'bg-black/[0.04] text-black/20 cursor-not-allowed'
+                                                ? 'bg-black text-white hover:bg-black/85 active:scale-95'
+                                                : 'bg-black/[0.04] text-black/20 cursor-not-allowed'
                                                 }`}
                                         >
                                             {canAfford ? <>Redeem <ArrowRight size={12} /></> : 'Low pts'}

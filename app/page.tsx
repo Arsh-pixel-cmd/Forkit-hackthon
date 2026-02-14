@@ -1,7 +1,8 @@
 'use client';
 
 import { useState, useEffect, useRef } from 'react';
-import { Camera, ShieldCheck, ShieldX, Clock, Zap, Eye, Leaf, Flame, RefreshCw, AlertTriangle, ChevronRight, Crosshair } from 'lucide-react';
+import { useRouter } from 'next/navigation';
+import { Camera, ShieldCheck, ShieldX, Zap, Eye, Leaf, Flame, RefreshCw, AlertTriangle, ChevronRight, Crosshair } from 'lucide-react';
 import Image from 'next/image';
 
 type ScanPhase = 'idle' | 'collecting' | 'analyzing' | 'result';
@@ -23,6 +24,7 @@ export default function FoodScanPage() {
   const [result, setResult] = useState<ScanResult | null>(null);
   const [progress, setProgress] = useState(0);
   const timerRef = useRef<NodeJS.Timeout | null>(null);
+  const router = useRouter();
 
   useEffect(() => {
     if (phase === 'collecting' || phase === 'analyzing') {
@@ -85,6 +87,38 @@ export default function FoodScanPage() {
           refundAmount: d.refundAmount || (d.freshness !== 'fresh' ? 120 : 0),
           notes: json.message
         });
+
+        // Persist to History
+        try {
+          const newEntry = {
+            id: `scan-${Date.now()}`,
+            date: 'Today',
+            time: new Date().toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' }),
+            name: d.recipeName || 'Scanned Food',
+            score: d.score,
+            status: d.freshness === 'fresh' ? 'Safe' : (d.freshness === 'caution' ? 'Caution' : 'Unsafe'),
+            calories: d.calories,
+            ingredients: d.ingredients || [],
+            protein: d.protein || 0,
+            fat: d.fat || 0,
+            category: d.category || 'General Food',
+            freshness: d.freshness,
+            details: {
+              temp: '24°C (Est)',
+              allergens: ['Analysis Pending'],
+              notes: json.message || 'Visual verification complete.'
+            }
+          };
+          const existing = JSON.parse(localStorage.getItem('foodoscope_history') || '[]');
+          localStorage.setItem('foodoscope_history', JSON.stringify([newEntry, ...existing].slice(0, 20)));
+          // Mark this as the latest scan for the health page spotlight
+          localStorage.setItem('foodoscope_latest_scan', JSON.stringify(newEntry));
+        } catch (err) {
+          console.error("Failed to save history", err);
+        }
+
+        // Auto-redirect to Health Report after a brief result view
+        setTimeout(() => router.push('/health'), 2500);
       } else {
         // Handle explicit failure from backend logic
         setResult({
@@ -280,7 +314,7 @@ export default function FoodScanPage() {
               </button>
               <button
                 onClick={analyze}
-                disabled={ready < 5}
+                disabled={ready < 1}
                 className="flex-1 bg-black text-white py-4 rounded-xl font-bold flex items-center justify-center gap-2 text-sm disabled:opacity-20 disabled:cursor-not-allowed hover:bg-black/85 active:scale-[0.99] transition-all"
               >
                 Run Analysis <span className="bg-white/10 px-2 py-0.5 rounded-md text-xs ml-1">{ready}/5</span>

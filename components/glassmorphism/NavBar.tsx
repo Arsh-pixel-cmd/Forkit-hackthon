@@ -59,7 +59,7 @@ export default function BottomNav() {
 
                 {/* Middle: Links */}
                 <div className="flex-1 flex flex-col items-center justify-center gap-1 py-4">
-                    {tabs.map(({ id, icon: Icon, label, href }, i) => {
+                    {tabs.map(({ id, icon: Icon, label, href }, _i) => {
                         const isActive = pathname === href;
                         return (
                             <Link

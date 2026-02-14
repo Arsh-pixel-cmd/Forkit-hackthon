@@ -8,8 +8,10 @@ const PROXY_ENDPOINT = `${SUPABASE_URL}/api-proxy`; // Direct path when running 
 
 
 /**
- * Proxy-based Dish Audit
- * Connects to Gemini for visual analysis and FlavorDB/RecipeDB via Supabase Edge Function
+ * Proxy-based Dish Audit with Hybrid Intelligence
+ * 1. Gemini: Visual Analysis (Is it food? What is it? Is it packaged?)
+ * 2. RecipeDB/FlavorDB: Scientific Data (Ingredients, Nutrition) for PREPARED food.
+ * 3. Gemini Fallback: For PACKAGED food (Kurkure, Lays), trust Gemini's reading of the label/brand knowledge.
  */
 export async function POST(req: Request) {
     try {
@@ -17,7 +19,7 @@ export async function POST(req: Request) {
 
         // Basic validation
         if (!orderId && (!photoUrls || photoUrls.length < 1)) {
-            // Relaxed validation for testing: just need one of them or at least SOMETHING
+            // Relaxed validation for testing
         }
 
         console.log("Audit received for:", orderId);
@@ -25,83 +27,115 @@ export async function POST(req: Request) {
         // --- REAL LOGIC ---
 
         let dishName = "Detected Dish";
-        let isFood = true;
+        let _isFood = true;
         let analysisResult = null;
 
-        // 1. GEMINI ANALYSIS
+        // 1. GEMINI ANALYSIS (The "Brain")
         if (photoUrls && photoUrls[0]) {
-            console.log("Running Gemini Analysis...");
+            console.log("Running Gemini Analysis with Indian Context...");
             analysisResult = await analyzeImageWithGemini(photoUrls[0]);
 
             if (analysisResult) {
                 console.log("Gemini Result:", analysisResult);
-                if (analysisResult.isFood === false) { // Explicit false check
+                if (analysisResult.isFood === false) {
                     return NextResponse.json({
                         status: 'error',
                         reason: analysisResult.reason || analysisResult.error || 'Image does not appear to be food.',
-                        refundAmount: 0 // No refund for non-food
+                        refundAmount: 0
                     });
                 }
                 dishName = analysisResult.dishName || dishName;
-                isFood = true;
+                _isFood = true;
             }
         } else {
             console.warn("Skipping Gemini: No Photo");
         }
 
-        // 2. RECIPEDB SEARCH & DETAILS
-        // Search for the identified dish
-        const searchPath = `/recipedb/recipe2-api/recipe/search?q=${encodeURIComponent(dishName)}`;
+        // 2. HYBRID DATA FETCHING
         let recipe = null;
         let flavorData = null;
+        let useGeminiIngredients = false;
 
-        try {
-            // A. Search RecipeDB
-            console.log(`Searching RecipeDB Proxy: ${PROXY_ENDPOINT}${searchPath}`);
-            const searchResp = await fetch(`${PROXY_ENDPOINT}${searchPath}`, {
-                headers: { 'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` }
-            });
+        // DECISION LOGIC:
+        // If it's a PACKAGED snack (Kurkure, Chips), RecipeDB won't have it. Use Gemini.
+        // If it's a PREPARED dish (Dal, Roti), RecipeDB is better.
 
-            if (searchResp.ok) {
-                const searchData = await searchResp.json();
-                const recipes = searchData.payload?.data || searchData;
+        if (analysisResult?.type === 'packaged') {
+            console.log("Identified as PACKAGED/BRANDED food. Trusting Gemini for ingredients.");
+            useGeminiIngredients = true;
+        }
+        else {
+            // It's likely a prepared dish. Try RecipeDB/FlavorDB.
+            console.log(`Identified as PREPARED/COOKED food. Querying databases for: ${dishName}`);
 
-                if (Array.isArray(recipes) && recipes.length > 0) {
-                    recipe = recipes[0];
+            const searchPath = `/recipedb/recipe2-api/recipe/search?q=${encodeURIComponent(dishName)}`;
+
+            try {
+                // A. Search RecipeDB
+                console.log(`Searching RecipeDB Proxy...`);
+                const searchResp = await fetch(`${PROXY_ENDPOINT}${searchPath}`, {
+                    headers: { 'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` }
+                });
+
+                if (searchResp.ok) {
+                    const searchData = await searchResp.json();
+                    const recipes = searchData.payload?.data || searchData;
+
+                    if (Array.isArray(recipes) && recipes.length > 0) {
+                        recipe = recipes[0];
+                        console.log("RecipeDB Match Found:", recipe.Recipe_title);
+                    } else {
+                        console.log("RecipeDB: No match found.");
+                    }
                 }
+
+                // B. Search FlavorDB (Enrichment)
+                const flavorPath = `/flavordb/entities/by-entity-alias-readable?alias=${encodeURIComponent(dishName)}`;
+                console.log(`Searching FlavorDB Proxy...`);
+                const flavorResp = await fetch(`${PROXY_ENDPOINT}${flavorPath}`, {
+                    headers: { 'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` }
+                });
+
+                if (flavorResp.ok) {
+                    flavorData = await flavorResp.json();
+                    console.log("FlavorDB Data found:", flavorData ? "Yes" : "No");
+                }
+
+            } catch (e) {
+                console.error("Database Search Failed:", e);
             }
-
-            // B. Search FlavorDB (New Integration)
-            // Use Entity Controller to find flavor info for the dish/ingredient
-            // Endpoint: /entities/by-entity-alias-readable?alias={dishName}
-            const flavorPath = `/flavordb/entities/by-entity-alias-readable?alias=${encodeURIComponent(dishName)}`;
-            console.log(`Searching FlavorDB Proxy: ${PROXY_ENDPOINT}${flavorPath}`);
-            const flavorResp = await fetch(`${PROXY_ENDPOINT}${flavorPath}`, {
-                headers: { 'Authorization': `Bearer ${process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY || ''}` }
-            });
-
-            if (flavorResp.ok) {
-                flavorData = await flavorResp.json();
-                console.log("FlavorDB Data found:", flavorData ? "Yes" : "No");
-            } else {
-                console.warn("FlavorDB Search Failed:", flavorResp.status);
-            }
-
-        } catch (e) {
-            console.error("Database Search Failed:", e);
-            // Continue even if DB search fails, using Gemini data if available
         }
 
-        // Combine Data
-        // Prioritize RecipeDB > FlavorDB > Gemini > Default
-        const finalIngredients = recipe
-            ? parseIngredients(recipe.Ingredients || recipe.ingredients)
-            : (flavorData ? [flavorData.entity_alias_readable || dishName]
-                : (analysisResult?.ingredients || ['Unknown']));
+        // 3. COMBINE DATA
+        // Priority:
+        // - If PACKAGED: Gemini > DB (because DB is wrong for brands)
+        // - If PREPARED: DB > Gemini (because DB is scientifically accurate)
 
-        const finalCalories = recipe
-            ? Math.round(parseFloat(recipe.Energy || recipe.Calories || '0'))
-            : (analysisResult?.calories || 0);
+        let finalIngredients = ['Unknown'];
+        let finalCalories = 0;
+
+        if (useGeminiIngredients) {
+            finalIngredients = analysisResult?.ingredients || ['Unknown'];
+            finalCalories = analysisResult?.calories || 0;
+        } else {
+            // Prepared dish logic
+            if (recipe) {
+                finalIngredients = parseIngredients(recipe.Ingredients || recipe.ingredients);
+                finalCalories = Math.round(parseFloat(recipe.Energy || recipe.Calories || '0'));
+            } else if (flavorData) {
+                finalIngredients = [flavorData.entity_alias_readable || dishName];
+                finalCalories = 0; // FlavorDB doesn't always have calories
+            } else {
+                // Fallback to Gemini if DB failed even for prepared food
+                finalIngredients = analysisResult?.ingredients || ['Unknown'];
+                finalCalories = analysisResult?.calories || 0;
+            }
+        }
+
+        // If we still have 0 calories, try Gemini's estimate as last resort
+        if (finalCalories === 0 && analysisResult?.calories) {
+            finalCalories = analysisResult.calories;
+        }
 
         return NextResponse.json({
             status: 'success',
@@ -113,9 +147,9 @@ export async function POST(req: Request) {
                 ingredients: finalIngredients,
                 calories: finalCalories,
                 recipeName: recipe ? recipe.Recipe_title : (flavorData?.entity_alias_readable || dishName),
-                protein: recipe ? parseFloat(recipe.Protein || '0') : 0,
-                fat: recipe ? parseFloat(recipe['Total lipid (fat)'] || '0') : 0,
-                category: flavorData?.category_readable || 'General Food'
+                protein: recipe ? parseFloat(recipe.Protein || '0') : (analysisResult?.protein || 0),
+                fat: recipe ? parseFloat(recipe['Total lipid (fat)'] || '0') : (analysisResult?.fat || 0),
+                category: flavorData?.category_readable || (useGeminiIngredients ? 'Packaged Snack' : 'General Food')
             }
         });
 
@@ -141,27 +175,53 @@ async function analyzeImageWithGemini(base64Data: string) {
             dishName: "Test Food (Key Missing)",
             ingredients: ["Sample Ingredient 1", "Sample Ingredient 2"],
             freshness: "fresh",
-            calories: 250
+            calories: 250,
+            protein: 12,
+            fat: 8,
+            type: "prepared"
         };
     }
 
     const genAI = new GoogleGenerativeAI(apiKey);
-    const model = genAI.getGenerativeModel({ model: "gemini-1.5-flash" });
+    const model = genAI.getGenerativeModel({
+        model: "gemini-2.0-flash",
+        generationConfig: { responseMimeType: "application/json" } // Force JSON mode
+    });
 
     // Clean base64 for Gemini (remove data:image/...;base64, prefix if present)
     const base64Content = base64Data.replace(/^data:image\/\w+;base64,/, "");
 
-    const prompt = `Analyze this food image. 
-    Return a strictly valid JSON object with no markdown formatting.
-    The JSON should have these fields:
-    - isFood: boolean
-    - dishName: string (e.g. "Pepperoni Pizza", "Caesar Salad")
-    - ingredients: string[] (list of visible or likely ingredients)
-    - freshness: "fresh" | "caution" | "spoiled" (based on visual cues)
-    - calories: number (estimated total calories)
-    - reason: string (if not food, explain why)
+    const prompt = `You are an expert food critic specializing in INDIAN CUISINE and PACKAGED SNACKS.
+    Analyze this food image.
+    
+    1. Identify the dish name. 
+       - If it is a packaged snack (like Kurkure, Lays, Haldiram's), identify the BRAND and FLAVOR (e.g., "Kurkure Masala Munch", "Lays India's Magic Masala").
+       - If it is a prepared Indian dish, use the authentic name (e.g., "Pav Bhaji", "Masala Dosa", "Paneer Butter Masala").
+    
+    2. Determine the TYPE: "packaged" (chips, biscuits, chocolate, canned) OR "prepared" (cooked meals, salads, fruits).
 
-    If it is NOT food, set isFood to false.`;
+    3. Estimate ingredients:
+       - For packaged items: List the likely ingredients based on the brand/flavor (e.g. "Rice Meal, Corn Meal, Spices").
+       - For prepared items: List standard ingredients.
+
+    4. Assess freshness: "fresh", "caution" (looks stale/old), or "spoiled" (mold/rot visible).
+
+    5. Estimate calories per serving.
+
+    6. Estimate protein (grams) and fat (grams) per serving.
+
+    Return JSON:
+    {
+        "isFood": boolean,
+        "dishName": "string",
+        "type": "packaged" | "prepared",
+        "ingredients": ["string", "string"],
+        "freshness": "fresh" | "caution" | "spoiled",
+        "calories": number,
+        "protein": number,
+        "fat": number,
+        "reason": "string (if not food)"
+    }`;
 
     try {
         const result = await model.generateContent([
@@ -169,25 +229,18 @@ async function analyzeImageWithGemini(base64Data: string) {
             {
                 inlineData: {
                     data: base64Content,
-                    mimeType: "image/jpeg", // Assuming JPEG/PNG, Gemini is flexible
+                    mimeType: "image/jpeg",
                 },
             },
         ]);
 
         const response = await result.response;
-        let text = response.text();
+        const text = response.text();
 
         console.log("Raw Gemini Response:", text);
 
-        // Clean up markdown code blocks if Gemini ignores the system instruction to not use them
-        text = text.replace(/```json/g, '').replace(/```/g, '').trim();
+        return JSON.parse(text);
 
-        try {
-            return JSON.parse(text);
-        } catch (e) {
-            console.error("Failed to parse Gemini JSON:", e);
-            return { isFood: true, dishName: "Unknown", error: "JSON Parse Error" };
-        }
     } catch (e) {
         console.error("Gemini API Failed:", e);
         return { isFood: false, error: String(e) };
@@ -203,10 +256,10 @@ function parseIngredients(ingString: string | unknown[]): string[] {
             try {
                 const parsed = JSON.parse(ingString.replace(/'/g, '"')); // Replace single quotes just in case
                 if (Array.isArray(parsed)) return parsed;
-            } catch (e) { /* ignore */ }
+            } catch (_e) { /* ignore */ }
         }
         return ingString.split(',').slice(0, 5).map(s => s.trim());
     }
     return ['Spices', 'Main Ingredient'];
-}
 
+}
