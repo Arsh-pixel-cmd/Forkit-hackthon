@@ -146,3 +146,4 @@ Built with 🧠 and ☕ for **Fork-IT 2026 Hackathon**.
 <p align="center">
   <b>⭐ Star this repo if you believe food transparency matters!</b>
 </p>
+./start_proxy_no_docker.sh
